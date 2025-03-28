@@ -28,7 +28,7 @@ public actor Store<R: Reducer, S: ViewState, A: Sendable>: ObservableObject, Ide
     
     let stream: AsyncStream<S>
     
-    init(state: S, reducer: R) where R.State == S, R.Action == A {
+    public init(state: S, reducer: R) where R.State == S, R.Action == A {
         self.state = state
         self.reducer = reducer
         
