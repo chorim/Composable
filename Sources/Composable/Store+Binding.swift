@@ -34,7 +34,9 @@ extension Store {
             get: { [unowned self] in get(self.state) },
             set: { [unowned self] newValue in
                 if get(self.state) != newValue {
-                    self.send(action: action(newValue))
+                    Task {
+                        await self.send(action: action(newValue))
+                    }
                 }
             }
         )
