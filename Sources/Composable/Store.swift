@@ -14,7 +14,7 @@ public actor Store<R: Reducer, S: ViewState, A: Sendable>: ObservableObject, Ide
     public let id: UUID = UUID()
     
     @MainActor
-    private(set) var state: S {
+    public private(set) var state: S {
         willSet {
             objectWillChange.send()
         }
