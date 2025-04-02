@@ -37,7 +37,7 @@ public actor Store<R: Reducer, S: ViewState, A: Sendable>: ObservableObject, Ide
         continuation.yield(state)
     }
     
-    func send(action: sending A) async where R: Sendable, R.State == S, R.Action == A {
+    public func send(action: sending A) async where R: Sendable, R.State == S, R.Action == A {
         var newState = await state
         
         newState = await reducer.reduce(in: newState, action: action)
