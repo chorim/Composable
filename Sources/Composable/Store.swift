@@ -2,7 +2,7 @@
 //  Store.swift
 //  Composable
 //
-//  Created by chorim.i on 3/27/25.
+//  Created by Insu Byeon on 3/27/25.
 //
 
 import Foundation
@@ -40,10 +40,19 @@ public actor Store<R: Reducer, S: ViewState, A: Sendable>: ObservableObject, Ide
     public func send(action: sending A) async where R: Sendable, R.State == S, R.Action == A {
         var newState = await state
         
-        newState = await reducer.reduce(in: newState, action: action)
-        
-        // UI update should be called on the main thread;
-        await MainActor.run { state = newState }
+        switch await reducer.mutate(action: action) {
+        case .concat(let multipleActions):
+            // 여러개의 액션을 순차적으로 수행한다.
+            for action in multipleActions {
+                newState = await reducer.reduce(in: newState, action: action)
+                // 실행한 하나의 액션마다 새로운 상태를 방출한다.
+                await MainActor.run { state = newState }
+            }
+        case .none:
+            newState = await reducer.reduce(in: newState, action: action)
+            // UI update should be called on the main thread;
+            await MainActor.run { state = newState }
+        }
     }
 }
 
