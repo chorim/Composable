@@ -3,13 +3,13 @@
 Composable is a framework for unidirectional application architecture using actor.
 The basic concept of a composable is as follows;
 
-- Easy to code-reading and to implements some business logic with less code.
-- Be able to start small. You don't need to rewrite all files. Let's start with a small snippet of code.
-- A lightweight framework. Easy to adopt it into your project.
+- Easy to read code and implement some business logic with less code.
+- You can start small. You don't need to rewrite all the files. Let's start with a small piece of code.
+- A lightweight framework. Easy to integrate into your project.
 
 
 ### Usage
-In the SwiftUI, you can create and use a Store using StateObject property wrapper.
+In the SwiftUI, you can use the StateObject property wrapper to create and use a store.
 
 ```swift
 import SwiftUI
@@ -49,7 +49,7 @@ struct CounterView: View {
     }
 }
 ```
-If the some view needs the previous Store, pass the Store using SwiftUI  `environmentObject(_:)` makes passing it so simple.
+If some view needs the previous store, pass the store with SwiftUI `environmentObject(_:)` which makes it easy to pass.
 
 ```swift
 NavigationLink {
@@ -60,7 +60,7 @@ NavigationLink {
 }
 ```
 
-In the UIKit, you can create and use a Store and `asPublisher(_:)` for between State and UI binding.
+In the UIKit, you can create and use a store and an `asPublisher(_:)` for the binding between the state and the UI.
 
 ```swift
 import UIKit
