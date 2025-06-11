@@ -65,16 +65,17 @@ public actor TestStore<R: Reducer & Sendable, S: ViewState, A: Sendable>: Observ
     }
     
     public func send(action: sending A, assert: ((inout S) -> Void)? = nil) async where R: Sendable, R.State == S, R.Action == A {
-        var currentState = await state
-
-        let newState = await reducer.reduce(in: currentState, action: action)
-
-        assert?(&currentState)
+        let mutations = await reducer.mutate(action: action)
         
-        await MainActor.run { state = newState }
-        
-        if assert != nil {
-            assertStateNoDifference(newState, currentState)
+        for mutation in mutations {
+            var currentState = await state
+            let newState = reducer.reduce(in: currentState, mutation: mutation)
+            assert?(&currentState)
+            await MainActor.run { state = newState }
+            
+            if assert != nil {
+                assertStateNoDifference(newState, currentState)
+            }
         }
     }
     

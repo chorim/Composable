@@ -37,20 +37,11 @@ public actor Store<R: Reducer, S: ViewState, A: Sendable>: ObservableObject, Ide
         continuation.yield(state)
     }
     
-    public func send(action: sending A) async where R: Sendable, R.State == S, R.Action == A {
-        var newState = await state
+    public func send(action: sending A, isolation: isolated (any Actor)? = #isolation) async where R: Sendable, R.State == S, R.Action == A {
+        let mutations = await reducer.mutate(action: action)
         
-        switch await reducer.mutate(action: action) {
-        case .concat(let multipleActions):
-            // 여러개의 액션을 순차적으로 수행한다.
-            for action in multipleActions {
-                newState = await reducer.reduce(in: newState, action: action)
-                // 실행한 하나의 액션마다 새로운 상태를 방출한다.
-                await MainActor.run { state = newState }
-            }
-        case .none:
-            newState = await reducer.reduce(in: newState, action: action)
-            // UI update should be called on the main thread;
+        for mutation in mutations {
+            let newState = reducer.reduce(in: await state, mutation: mutation)
             await MainActor.run { state = newState }
         }
     }
