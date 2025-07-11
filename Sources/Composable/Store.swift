@@ -38,23 +38,22 @@ where R.State: Sendable, R.Action: Sendable {
         (mutationStream, mutationContinuation) = AsyncStream<R.Mutation>.makeStream()
         
         continuation.yield(state)
+        
+        Task { await processMutations() }
+    }
+    
+    private func processMutations() async {
+        for await mutation in mutationStream {
+            await MainActor.run {
+                let newState = reducer.reduce(in: state, mutation: mutation)
+                self.state = newState
+            }
+        }
     }
     
     public func send(isolation: isolated (any Actor)? = #isolation, action: R.Action) async {
-        let (mutationStream, mutationContinuation) = AsyncStream<R.Mutation>.makeStream()
         let emitter = MutationEmitter<R.Mutation>(continuation: .init(mutationContinuation))
-
-        let reducerTask = Task {
-            for await mutation in mutationStream {
-                let newState = await reducer.reduce(in: await state, mutation: mutation)
-                await MainActor.run { self.state = newState }
-            }
-        }
-
-        await reducer.mutate(isolation: #isolation, action: action, emitter: emitter)
-
-        mutationContinuation.finish()
-        await reducerTask.value
+        await reducer.mutate(isolation: isolation, action: action, emitter: emitter)
     }
     
     @MainActor
