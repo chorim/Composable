@@ -14,13 +14,27 @@ fileprivate struct CounterReducer: Reducer {
     }
     
     enum Action: Sendable {
+        case increment(Int)
+        case decrement(Int)
+    }
+    
+    enum Mutation {
         case increase(Int)
         case decrease(Int)
     }
     
-    func reduce(in state: State, action: Action) async -> State {
-        var newState = state
+    func mutate(isolation: isolated (any Actor)?, action: Action, emitter: MutationEmitter<Mutation>) async {
         switch action {
+        case let .increment(value):
+            await emitter(.increase(value))
+        case let .decrement(value):
+            await emitter(.decrease(value))
+        }
+    }
+    
+    func reduce(in state: State, mutation: Mutation) -> State {
+        var newState = state
+        switch mutation {
         case let .increase(value):
             newState.counter += value
         case let .decrease(value):
@@ -31,16 +45,16 @@ fileprivate struct CounterReducer: Reducer {
 }
 
 @Test func testIncreamentAndDecrement() async throws {
-    let testStore = TestStore(
-        state: CounterReducer.State(),
+    let testStore = await TestStore(
+        initialState: CounterReducer.State(),
         reducer: CounterReducer()
     )
     
-    await testStore.send(action: .increase(1)) {
+    await testStore.send(action: .increment(1)) {
         $0.counter = 1
     }
     
-    await testStore.send(action: .decrease(1)) {
+    await testStore.send(action: .decrement(1)) {
         $0.counter = 0
     }
     
@@ -49,4 +63,3 @@ fileprivate struct CounterReducer: Reducer {
     
     #expect(isFailure == false, Comment(rawValue: failureMessage))
 }
-

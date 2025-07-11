@@ -196,21 +196,21 @@ extension OSUnfairLock {
 }
 
 extension Store {
-    private typealias PublisherType = AsyncSequencePublisher<AsyncStream<S>, Never>
+    private typealias PublisherType = AsyncSequencePublisher<AsyncStream<R.State>, Never>
     
     @MainActor private var publisher: PublisherType {
-        return AsyncSequencePublisher<AsyncStream<S>, Never>(stream)
+        return AsyncSequencePublisher<AsyncStream<R.State>, Never>(stream)
     }
     
     @MainActor private var receiveOnMainThread: Publishers.ReceiveOn<PublisherType, DispatchQueue> {
         return publisher.receive(on: DispatchQueue.main)
     }
     
-    @MainActor public func asPublisher() -> AnyPublisher<S, Never> {
+    @MainActor public func asPublisher() -> AnyPublisher<R.State, Never> {
         return receiveOnMainThread.eraseToAnyPublisher()
     }
     
-    @MainActor public func asPublisher<T>(_ keyPath: KeyPath<S, T>) -> AnyPublisher<T, Never> {
+    @MainActor public func asPublisher<T>(_ keyPath: KeyPath<R.State, T>) -> AnyPublisher<T, Never> {
         return receiveOnMainThread.map(keyPath).eraseToAnyPublisher()
     }
 }

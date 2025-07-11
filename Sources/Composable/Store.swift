@@ -7,86 +7,118 @@
 
 import Foundation
 import Combine
+import SwiftUI
 
-public typealias ComposableStore<R: Reducer> = Store<R, R.State, R.Action>
-
-public actor Store<R: Reducer, S: ViewState, A: Sendable>: ObservableObject, Identifiable {
+public actor Store<R: Reducer>: ObservableObject, Identifiable
+where R.State: Sendable, R.Action: Sendable {
     public let id: UUID = UUID()
     
     @MainActor
-    public private(set) var state: S {
-        willSet {
-            objectWillChange.send()
-        }
-        didSet {
-            continuation.yield(state)
-        }
+    public private(set) var state: R.State {
+        willSet { objectWillChange.send() }
+        didSet { continuation.yield(state) }
     }
     
+    @MainActor
+    public private(set) var taskRegistry = CancellableTaskRegistry<AnyHashable>()
+    
     private let reducer: R
-    private let continuation: AsyncStream<S>.Continuation
+    private let continuation: AsyncStream<R.State>.Continuation
+    let stream: AsyncStream<R.State>
     
-    let stream: AsyncStream<S>
+    private let mutationContinuation: AsyncStream<R.Mutation>.Continuation
+    private let mutationStream: AsyncStream<R.Mutation>
     
-    public init(state: S, reducer: R) where R.State == S, R.Action == A {
-        self.state = state
+    @MainActor
+    public init(initialState: R.State, reducer: R) {
+        self.state = initialState
         self.reducer = reducer
         
-        (stream, continuation) = AsyncStream<S>.makeStream()
+        (stream, continuation) = AsyncStream<R.State>.makeStream()
+        (mutationStream, mutationContinuation) = AsyncStream<R.Mutation>.makeStream()
         
         continuation.yield(state)
     }
     
-    public func send(action: sending A, isolation: isolated (any Actor)? = #isolation) async where R: Sendable, R.State == S, R.Action == A {
-        let mutations = await reducer.mutate(action: action)
-        
-        for mutation in mutations {
-            let newState = reducer.reduce(in: await state, mutation: mutation)
-            await MainActor.run { state = newState }
-        }
-    }
-}
+    public func send(isolation: isolated (any Actor)? = #isolation, action: R.Action) async {
+        let (mutationStream, mutationContinuation) = AsyncStream<R.Mutation>.makeStream()
+        let emitter = MutationEmitter<R.Mutation>(continuation: .init(mutationContinuation))
 
-extension Store: Hashable {
-    nonisolated public func hash(into hasher: inout Hasher) {
-        // Needs more to hashing item..
-        hasher.combine(id)
-    }
-    
-    public static func == (lhs: Store<R, S, A>, rhs: Store<R, S, A>) -> Bool {
-        return lhs.id == rhs.id
-    }
-}
+        let reducerTask = Task {
+            for await mutation in mutationStream {
+                let newState = await reducer.reduce(in: await state, mutation: mutation)
+                await MainActor.run { self.state = newState }
+            }
+        }
 
-// MARK: Store utils for send
-public extension Store {
-    func send(_ factory: () async -> A) async where R.State == S, R.Action == A {
-        await send(action: await factory())
+        await reducer.mutate(isolation: #isolation, action: action, emitter: emitter)
+
+        mutationContinuation.finish()
+        await reducerTask.value
     }
     
-    func send(_ factory: () async throws -> A) async where R.State == S, R.Action == A {
-        if let action = try? await factory() {
-            await send(action: action)
+    @MainActor
+    public func cancelTask(id: AnyHashable) {
+        taskRegistry.cancel(id: id)
+    }
+
+    @MainActor
+    public func cancelAllTasks() {
+        taskRegistry.cancelAll()
+    }
+    
+    // MARK: - Binding
+    @MainActor
+    public func binding<V>(
+        get: @escaping (R.State?) -> V,
+        mutation: @escaping (V) -> R.Mutation
+    ) -> Binding<V> where V: Equatable {
+        Binding { [weak self] in
+            get(self?.state)
+        } set: { [weak self] value in
+            if get(self?.state) != value {
+                Task {
+                    guard let self else { return }
+                    let newState = self.reducer.reduce(in: self.state, mutation: mutation(value))
+                    await MainActor.run {
+                        self.state = newState
+                    }
+                }
+            }
         }
     }
     
-    func send<Seq: AsyncSequence>(
-        sequence: Seq
-    ) async throws where Seq.Element == A, R.State == S, R.Action == A {
-        for try await action in sequence {
-            await send(action: action)
-        }
+    @MainActor
+    public func binding<V>(
+        get: @escaping (R.State?) -> V,
+        send action: @escaping (V) -> Void
+    ) -> Binding<V> where V: Equatable {
+        Binding(
+            get: { [weak self] in
+                return get(self?.state)
+            },
+            set: { [weak self] newValue in
+                if get(self?.state) != newValue {
+                    action(newValue)
+                }
+            }
+        )
     }
     
-    func merge(_ sequence: Array<A>) async where R.State == S, R.Action == A {
-        for action in sequence {
-            await send(action: action)
-        }
-    }
-    
-    func merge(_ factory: () async -> [A]) async where R.State == S, R.Action == A {
-        for action in await factory() {
-            await send(action: action)
-        }
+    @MainActor
+    public func binding<V>(
+        get: @escaping (R.State?) -> V,
+        compactSend action: @escaping (V) -> R.Action
+    ) -> Binding<V> where V: Equatable {
+        Binding(
+            get: { [weak self] in get(self?.state) },
+            set: { [weak self] newValue in
+                if get(self?.state) != newValue {
+                    Task {
+                        await self?.send(action: action(newValue))
+                    }
+                }
+            }
+        )
     }
 }

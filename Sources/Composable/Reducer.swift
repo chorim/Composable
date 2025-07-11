@@ -11,14 +11,13 @@ public protocol Reducer<State, Action>: Sendable {
     associatedtype State: ViewState
     associatedtype Action: Sendable
     associatedtype Mutation: Sendable
-    associatedtype Body
     
     /// It takes in actions from actors that can be executed
     /// asynchronously and emits mutations that affect the UI.
     ///
     /// - Parameter action: Action from actor
     /// - Returns: Collections of variations that can affect the UI
-    func mutate(action: Action) async -> [Mutation]
+    func mutate(isolation: isolated (any Actor)?, action: Action, emitter: MutationEmitter<Mutation>) async
     
     
     /// Mutate the state value with a new mutation that affects UI changes.
@@ -28,5 +27,5 @@ public protocol Reducer<State, Action>: Sendable {
     ///   - state: Current state value
     ///   - mutation: mutation passed to `store(send:)
     /// - Returns: New status value
-    func reduce(in state: State, mutation: Mutation) -> State
+    @MainActor func reduce(in state: State, mutation: Mutation) -> State
 }

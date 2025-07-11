@@ -38,15 +38,19 @@ import Combine
 ///
 /// await XCTAssertStore(testStore) // Test fail.
 /// ```
-public actor TestStore<R: Reducer & Sendable, S: ViewState, A: Sendable>: ObservableObject, Identifiable, Equatable {
+public actor TestStore<R: Reducer>: ObservableObject, Identifiable
+where R.State: Sendable, R.Action: Sendable {
     public let id: UUID = UUID()
     
     @MainActor
-    private(set) var state: S {
-        willSet {
-            objectWillChange.send()
-        }
+    public private(set) var state: R.State {
+        willSet { objectWillChange.send() }
+        didSet { continuation.yield(state) }
     }
+    
+    @MainActor
+    public private(set) var taskRegistry = CancellableTaskRegistry<AnyHashable>()
+    
     
     /// Report with failed test results
     ///
@@ -58,30 +62,56 @@ public actor TestStore<R: Reducer & Sendable, S: ViewState, A: Sendable>: Observ
     private var reports: [Report] = []
     
     private let reducer: R
+    private let continuation: AsyncStream<R.State>.Continuation
+    let stream: AsyncStream<R.State>
     
-    init(state: S, reducer: R) where R.State == S, R.Action == A {
-        self.state = state
+    private let mutationContinuation: AsyncStream<R.Mutation>.Continuation
+    private let mutationStream: AsyncStream<R.Mutation>
+    
+    @MainActor
+    public init(initialState: R.State, reducer: R) {
+        self.state = initialState
         self.reducer = reducer
+        
+        (stream, continuation) = AsyncStream<R.State>.makeStream()
+        (mutationStream, mutationContinuation) = AsyncStream<R.Mutation>.makeStream()
+        
+        continuation.yield(state)
     }
     
-    public func send(action: sending A, assert: ((inout S) -> Void)? = nil) async where R: Sendable, R.State == S, R.Action == A {
-        let mutations = await reducer.mutate(action: action)
-        
-        for mutation in mutations {
-            var currentState = await state
-            let newState = reducer.reduce(in: currentState, mutation: mutation)
-            assert?(&currentState)
-            await MainActor.run { state = newState }
-            
-            if assert != nil {
-                assertStateNoDifference(newState, currentState)
+    public func send(isolation: isolated (any Actor)? = #isolation, action: R.Action, assert: (@Sendable (inout R.State) -> Void)? = nil) async {
+        let (mutationStream, mutationContinuation) = AsyncStream<R.Mutation>.makeStream()
+        let emitter = MutationEmitter<R.Mutation>(continuation: .init(mutationContinuation))
+
+        let reducerTask = Task {
+            for await mutation in mutationStream {
+                var currentState = await state
+                let newState = await reducer.reduce(in: await state, mutation: mutation)
+                
+                // MainActor context에서 assert 수행
+                if let assert = assert {
+                    await MainActor.run {
+                        var snapshot = currentState
+                        assert(&snapshot)
+                        Task { @MainActor in
+                            await assertStateNoDifference(newState, snapshot)
+                        }
+                    }
+                }
+
+                await MainActor.run { self.state = newState }
             }
         }
+
+        await reducer.mutate(isolation: #isolation, action: action, emitter: emitter)
+
+        mutationContinuation.finish()
+        await reducerTask.value
     }
     
-    private func assertStateNoDifference(_ s1: S, _ s2: S) {
+    private func assertStateNoDifference(_ s1: R.State, _ s2: R.State) {
         if s1 != s2 {
-            reports.append(Report(expected: s1, failure: s2))
+            reports.append(Report(actual: s1, expected: s2))
         }
     }
     
@@ -92,31 +122,26 @@ public actor TestStore<R: Reducer & Sendable, S: ViewState, A: Sendable>: Observ
     var failureMessage: String {
         return reports.map(\.message).joined(separator: ", ")
     }
-    
-    // MARK: - Equatable
-    public static func == (lhs: TestStore<R, S, A>, rhs: TestStore<R, S, A>) -> Bool {
-        return lhs.id == rhs.id
-    }
 }
 
 extension TestStore {
     struct Report: Sendable {
-        let expected: S
-        let failure: S
+        let actual: R.State
+        let expected: R.State
         
         let message: String
         
-        init(expected: S, failure: S, message: String = "") {
+        init(actual: R.State, expected: R.State, message: String = "") {
+            self.actual = actual
             self.expected = expected
-            self.failure = failure
             
             if message.isEmpty {
                 self.message = """
                 
-                ❗ Expected to be a success but got a failure.
+                ❗ Test failed: State did not match expectation
                 
-                ✅ Expected : \(Self.dump(expected))
-                💩 Failure  : \(Self.dump(failure))
+                🔴 Actual   state  : \(Self.dump(actual))
+                🟢 Expected state  : \(Self.dump(expected))
                 
                 """
             } else {
