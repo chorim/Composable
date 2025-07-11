@@ -12,14 +12,25 @@ let package = Package(
             name: "Composable",
             targets: ["Composable"]),
     ],
+    dependencies: [
+        .package(
+            url: "https://github.com/pointfreeco/swift-case-paths.git",
+            exact: "1.7.1"
+        )
+    ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .target(
-            name: "Composable"),
+            name: "Composable",
+            dependencies: [
+                .product(name: "CasePaths", package: "swift-case-paths")
+            ]
+        ),
         .testTarget(
             name: "ComposableTests",
             dependencies: ["Composable"]
         ),
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )

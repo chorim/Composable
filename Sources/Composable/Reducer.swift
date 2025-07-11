@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import CasePaths
 
 public protocol Reducer<State, Action>: Sendable {
     associatedtype State: ViewState
@@ -28,4 +29,34 @@ public protocol Reducer<State, Action>: Sendable {
     ///   - mutation: mutation passed to `store(send:)
     /// - Returns: New status value
     @MainActor func reduce(in state: State, mutation: Mutation) -> State
+}
+
+public extension Reducer {
+    func pullback<GlobalState, GlobalAction, GlobalMutation>(
+        state toLocalState: _SendableWritableKeyPath<GlobalState, State>,
+        action fromGlobalAction: AnyCasePath<GlobalAction, Action>,
+        mutation toGlobalMutation: @Sendable @escaping (Mutation) -> GlobalMutation,
+        fromGlobalMutation: AnyCasePath<GlobalMutation, Mutation>
+    ) -> PullbackReducer<Self, GlobalState, GlobalAction, GlobalMutation> {
+        return PullbackReducer(
+            base: self,
+            toLocalState: toLocalState,
+            fromGlobalAction: fromGlobalAction,
+            toGlobalMutation: toGlobalMutation,
+            fromGlobalMutation: fromGlobalMutation
+        )
+    }
+    
+    func pullback<GlobalState, GlobalAction, GlobalMutation>(
+        state toLocalState: _SendableWritableKeyPath<GlobalState, State>,
+        action fromGlobalAction: CaseKeyPath<GlobalAction, Action>,
+        mutation toGlobalMutation: @Sendable @escaping (Mutation) -> GlobalMutation,
+        fromGlobalMutation: CaseKeyPath<GlobalMutation, Mutation>
+    ) -> PullbackReducer<Self, GlobalState, GlobalAction, GlobalMutation> {
+        return pullback(state: toLocalState, action: AnyCasePath(fromGlobalAction), mutation: toGlobalMutation, fromGlobalMutation: AnyCasePath(fromGlobalMutation))
+    }
+    
+    static func combine(_ reducers: [AnyReducer<State, Action, Mutation>]) -> CombinedReducer<State, Action, Mutation> {
+        CombinedReducer(reducers)
+    }
 }
