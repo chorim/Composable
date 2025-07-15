@@ -30,6 +30,11 @@ where R.State: Sendable, R.Action: Sendable {
     private let mutationStream: AsyncStream<R.Mutation>
     
     @MainActor
+    private var label: String = "UnderlyingStore"
+    
+    @MainActor var isDebugging: Bool = false
+    
+    @MainActor
     public init(initialState: R.State, reducer: R) {
         self.state = initialState
         self.reducer = reducer
@@ -39,6 +44,8 @@ where R.State: Sendable, R.Action: Sendable {
         
         continuation.yield(state)
         
+        label = String(describing: type(of: self))
+        
         Task { await processMutations() }
     }
     
@@ -46,6 +53,10 @@ where R.State: Sendable, R.Action: Sendable {
         for await mutation in mutationStream {
             await MainActor.run {
                 let newState = reducer.reduce(in: state, mutation: mutation)
+                if isDebugging, let differences = diff(state, newState, label: label) {
+                    // TODO: Need to inject DebugLogInterface externally and have it call its methods
+                    print(differences)
+                }
                 self.state = newState
             }
         }
@@ -54,6 +65,11 @@ where R.State: Sendable, R.Action: Sendable {
     public func send(isolation: isolated (any Actor)? = #isolation, action: R.Action) async {
         let emitter = MutationEmitter<R.Mutation>(continuation: .init(mutationContinuation))
         await reducer.mutate(isolation: isolation, action: action, emitter: emitter)
+    }
+    
+    @MainActor
+    public func mutate(_ mutation: R.Mutation) {
+        state = reducer.reduce(in: state, mutation: mutation)
     }
     
     @MainActor
@@ -66,6 +82,11 @@ where R.State: Sendable, R.Action: Sendable {
         taskRegistry.cancelAll()
     }
     
+    @MainActor
+    public func setDebugging(_ isDebugging: Bool) {
+        self.isDebugging = isDebugging
+    }
+    
     // MARK: - Binding
     @MainActor
     public func binding<V>(
@@ -76,13 +97,9 @@ where R.State: Sendable, R.Action: Sendable {
             get(self?.state)
         } set: { [weak self] value in
             if get(self?.state) != value {
-                Task {
-                    guard let self else { return }
-                    let newState = self.reducer.reduce(in: self.state, mutation: mutation(value))
-                    await MainActor.run {
-                        self.state = newState
-                    }
-                }
+                guard let self else { return }
+                let newState = reducer.reduce(in: self.state, mutation: mutation(value))
+                self.state = newState
             }
         }
     }
@@ -113,7 +130,7 @@ where R.State: Sendable, R.Action: Sendable {
             get: { [weak self] in get(self?.state) },
             set: { [weak self] newValue in
                 if get(self?.state) != newValue {
-                    Task {
+                    Task { @MainActor in
                         await self?.send(action: action(newValue))
                     }
                 }
