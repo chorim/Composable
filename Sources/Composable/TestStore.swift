@@ -85,10 +85,9 @@ where R.State: Sendable, R.Action: Sendable {
 
         let reducerTask = Task {
             for await mutation in mutationStream {
-                var currentState = await state
+                let currentState = await state
                 let newState = await reducer.reduce(in: await state, mutation: mutation)
                 
-                // MainActor context에서 assert 수행
                 if let assert = assert {
                     await MainActor.run {
                         var snapshot = currentState
@@ -107,6 +106,11 @@ where R.State: Sendable, R.Action: Sendable {
 
         mutationContinuation.finish()
         await reducerTask.value
+    }
+    
+    @MainActor
+    public func mutate(_ mutation: R.Mutation) {
+        state = reducer.reduce(in: state, mutation: mutation)
     }
     
     private func assertStateNoDifference(_ s1: R.State, _ s2: R.State) {
