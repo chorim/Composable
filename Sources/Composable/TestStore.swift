@@ -109,7 +109,7 @@ where R.State: Sendable, R.Action: Sendable {
     }
     
     @MainActor
-    public func mutate(_ mutation: R.Mutation) {
+    public func emit(mutation: R.Mutation) {
         state = reducer.reduce(in: state, mutation: mutation)
     }
     
